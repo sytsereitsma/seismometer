@@ -1,0 +1,80 @@
+{
+	"Name": "Seismo_filter",
+	"Description": "0.1-10Hz bandpass",
+	"Tool": "FW",
+	"Version": "1.2",
+	"Design": {
+		"visitedTabs": [
+			"filter-type",
+			"specifications",
+			"components"
+		],
+		"filterType": "bandPass",
+		"specifications": {
+			"gain": 65,
+			"gainUnit": "V/V",
+			"passbandAttenuation": -3,
+			"passbandFrequency": 10,
+			"stopbandAttenuation": -40,
+			"stopbandFrequency": 100,
+			"filterResponseValue": 0,
+			"filterResponseSlider": 50,
+			"centerFrequency": 1
+		},
+		"components": {
+			"vsPlus": 5,
+			"vsMinus": -5,
+			"optimization": "Noise",
+			"optimizationPreference": "nonSpecific",
+			"compensateForGbw": false,
+			"preferredAlgorithms": {
+				"sallenKey|lowPass": "lowpassV2"
+			},
+			"stages": [
+				{
+					"stageLetter": "A",
+					"componentSizing": 120,
+					"gain": 471,
+					"gainEnabled": true,
+					"implementation": "firstOrder",
+					"opAmps": "LT1112"
+				},
+				{
+					"stageLetter": "B",
+					"componentSizing": 120,
+					"gain": -1,
+					"gainEnabled": false,
+					"implementation": "sallenKey",
+					"opAmps": "LT1112"
+				},
+				{
+					"stageLetter": "C",
+					"componentSizing": 153,
+					"gain": 497,
+					"gainEnabled": true,
+					"implementation": "firstOrder",
+					"opAmps": "LT1112"
+				},
+				{
+					"stageLetter": "D",
+					"componentSizing": 153,
+					"gain": -1,
+					"gainEnabled": false,
+					"implementation": "sallenKey",
+					"opAmps": "LT1112"
+				}
+			],
+			"recommendedAmps": [],
+			"sortOrder": [
+				0,
+				2,
+				3,
+				1
+			]
+		},
+		"tolerances": {},
+		"nextSteps": {}
+	},
+	"CreatedDate": "2024-04-06 09:36:11 PM",
+	"UpdatedDate": "2024-04-06 09:36:11 PM"
+}
