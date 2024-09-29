@@ -14,9 +14,9 @@ use filerecordwriter::FileRecordWriter;
 use record::Record;
 
 fn processing_thread(rx: mpsc::Receiver<Vec<u8>>, stop_thread: Arc<AtomicBool>) {
-    const TRIGGER_WINDOW: usize = 100;
+    const TRIGGER_WINDOW: usize = 5;
+    const TRIGGER_LEVEL: i32 = 250000;
     const AVERAGING_WINDOW: usize = 100;
-    const TRIGGER_LEVEL: i32 = 500000;
 
     let mut triggerdetector = triggerdetector::TriggerDetector::new(TRIGGER_LEVEL, TRIGGER_WINDOW);
     let mut data_writer = FileRecordWriter::new(AVERAGING_WINDOW).unwrap();

@@ -2,79 +2,76 @@ use record::Record;
 
 use crate::record;
 
-pub struct TriggerDetector {
-    threshold: i32,
-    window: Vec<Record>,
-    index: usize,
-    window_full: bool,
-    min_trigger_count: usize, // Number of consecutive triggers required to activate the trigger.
+struct ChannelTriggerDetector {
+    window: Vec<i32>,
 }
 
-impl TriggerDetector {
-    pub fn new(threshold: i32, window_size: usize) -> TriggerDetector {
-        TriggerDetector {
-            threshold,
-            window: vec![Record::default(); window_size],
-            index: 0,
-            window_full: false,
-            min_trigger_count: 3,
-        }
-    }
+impl ChannelTriggerDetector {
+    fn is_triggered(&self, reference_index: usize, threshold: i32) -> bool
+    {
+        let reference_value = self.window[reference_index];
+        let reference_delta = self.window[(reference_index + 1) % self.window.len()] - reference_value;
 
-    fn detect_trigger(&self) -> bool {
-        let end = if self.window_full {
-            self.window.len()
-        } else {
-            self.index
-        };
-
-        let mut min_x = i32::MAX; // Minimal x  in the window
-        let mut min_y = i32::MAX; // Minimal y value in the window
-        let mut min_z = i32::MAX; // Minimal z value in the window
-
-        // First determine the minimal values in the window
-        for i in 0..end {
-            let record = &self.window[i];
-            min_x = min_x.min(record.x_filt);
-            min_y = min_y.min(record.y_filt);
-            min_z = min_z.min(record.z_filt);
+        if reference_delta.abs() < threshold {
+            return false;
         }
 
-        let mut triggered = false;
-        let mut counts_x = 0; // Number of x triggers in the window
-        let mut counts_y = 0; // Number of y triggers in the window
-        let mut counts_z = 0; // Number of z triggers in the window
+        let reference_sign = reference_delta.signum();
+        let mut triggered = true;
 
-        // Next count the number of values with a difference from the minimal value larger than the threshold
-        for i in 0..end {
-            let record = &self.window[i];
+        let start = reference_index + 2;
+        for i in start..start + self.window.len() - 2 {
+            let value = &self.window[i % self.window.len()];
+            let delta = value - reference_value;
 
-            counts_x += ((record.x_filt - min_x) > self.threshold) as usize;
-            counts_y += ((record.y_filt - min_y) > self.threshold) as usize;
-            counts_z += ((record.z_filt - min_z) > self.threshold) as usize;
-
-            triggered = counts_x >= self.min_trigger_count
-                || counts_y >= self.min_trigger_count
-                || counts_z >= self.min_trigger_count;
-            
-            if triggered {
+            if delta.abs() < threshold || delta.signum() != reference_sign {
+                triggered = false;
                 break;
             }
         }
 
         triggered
     }
+}
+
+pub struct TriggerDetector {
+    threshold: i32,
+    x_detector: ChannelTriggerDetector,
+    y_detector: ChannelTriggerDetector,
+    z_detector: ChannelTriggerDetector,
+    index: usize,
+    window_full: bool,
+}
+
+impl TriggerDetector {
+    pub fn new(threshold: i32, window_size: usize) -> TriggerDetector {
+        TriggerDetector {
+            threshold,
+            x_detector: ChannelTriggerDetector { window: vec![0; window_size] },
+            y_detector: ChannelTriggerDetector { window: vec![0; window_size] },
+            z_detector: ChannelTriggerDetector { window: vec![0; window_size] },
+            index: 0,
+            window_full: false,
+        }
+    }
 
     pub fn detect(&mut self, record: &Record) -> bool {
-        let prev_index = self.index;
-        self.window[self.index] = record.clone();
-        self.index = (self.index + 1) % self.window.len();
+        self.x_detector.window[self.index] = record.x_filt;
+        self.y_detector.window[self.index] = record.y_filt;
+        self.z_detector.window[self.index] = record.z_filt;
 
-        if prev_index > self.index {
-            self.window_full = true;
+        let prev_index = self.index;
+        self.index = (self.index + 1) % self.x_detector.window.len();
+
+        self.window_full = self.window_full || (prev_index > self.index);
+
+        if !self.window_full {
+            return false;
         }
 
-        self.detect_trigger()
+        self.x_detector.is_triggered(self.index, self.threshold) ||
+            self.y_detector.is_triggered(self.index, self.threshold) ||
+            self.z_detector.is_triggered(self.index, self.threshold)
     }
 }
 
@@ -93,83 +90,102 @@ mod tests {
 
     #[test]
     fn test_detect_x_triggers() {
-        let mut detector = TriggerDetector::new(5, 3);
-        detector.min_trigger_count = 1;
+        const THRESHOLD: i32 = 5;
 
-        assert_eq!(detector.detect(&test_record(1, 0, 0)), false); // [1, -, -]
-        assert_eq!(detector.detect(&test_record(3, 0, 0)), false); // [1, 3, -]
-        assert_eq!(detector.detect(&test_record(-3, 0, 0)), true); // [1, 3, -3]
+        let mut detector = TriggerDetector::new(THRESHOLD, 3);
 
-        // The 3 is now the max value in the window, when it is replaced with 2 it should disable the trigger
-        assert_eq!(detector.detect(&test_record(2, 0, 0)), true); // [3, -3, 2]
-        assert_eq!(detector.detect(&test_record(2, 0, 0)), false); // [2, -3, 2]
+        assert!(!detector.detect(&test_record(0, 0, 0))); // [1, -, -]
+        assert!(!detector.detect(&test_record(THRESHOLD + 1, 0, 0))); // [1, THRESHOLD, -]
+        assert!(detector.detect(&test_record(THRESHOLD + 1, 0, 0))); // [1, THRESHOLD + 1, THRESHOLD + 1]
     }
 
     #[test]
     fn test_detect_y_triggers() {
-        let mut detector = TriggerDetector::new(5, 3);
-        detector.min_trigger_count = 1;
+        const THRESHOLD: i32 = 5;
 
-        assert_eq!(detector.detect(&test_record(0, 1, 0)), false); // [1, -, -]
-        assert_eq!(detector.detect(&test_record(0, 3, 0)), false); // [1, 3, -]
-        assert_eq!(detector.detect(&test_record(0, -3, 0)), true); // [1, 3, -3]
+        let mut detector = TriggerDetector::new(THRESHOLD, 3);
 
-        // The 3 is now the max value in the window, when it is replaced with 2 it should disable the trigger
-        assert_eq!(detector.detect(&test_record(0, 2, 0)), true); // [3, -3, 2]
-        assert_eq!(detector.detect(&test_record(0, 2, 0)), false); // [2, -3, 2]
+        assert!(!detector.detect(&test_record(0, 0, 0))); // [1, -, -]
+        assert!(!detector.detect(&test_record(0, THRESHOLD + 1, 0))); // [1, THRESHOLD, -]
+        assert!(detector.detect(&test_record(0, THRESHOLD + 1, 0))); // [1, THRESHOLD + 1, THRESHOLD + 1]
     }
 
     #[test]
     fn test_detect_z_triggers() {
-        let mut detector = TriggerDetector::new(5, 3);
-        detector.min_trigger_count = 1;
-
-        assert_eq!(detector.detect(&test_record(0, 0, 1)), false); // [1, -, -]
-        assert_eq!(detector.detect(&test_record(0, 0, 3)), false); // [1, 3, -]
-        assert_eq!(detector.detect(&test_record(0, 0, -3)), true); // [1, 3, -3]
-
-        // The 3 is now the max value in the window, when it is replaced with 2 it should disable the trigger
-        assert_eq!(detector.detect(&test_record(0, 0, 2)), true); // [3, -3, 2]
-        assert_eq!(detector.detect(&test_record(0, 0, 2)), false); // [2, -3, 2]
-    }
-
-    #[test]
-    fn test_trigger_when_window_is_not_full_yet() {
-        // A trigger should be detected when the window is not full yet.
-        let mut detector = TriggerDetector::new(5, 3);
-        detector.min_trigger_count = 1;
-
-        // Pick a high number to make sure we do not get a false trigger based on the window's init values
-        assert_eq!(detector.detect(&test_record(99, 0, 0)), false);
-        assert_eq!(detector.detect(&test_record(93, 0, 0)), true);
-    }
-
-    #[test]
-    fn test_min_trigger_count() {
-        // A trigger should be detected when the window is not full yet.
         const THRESHOLD: i32 = 5;
 
-        let mut detector = TriggerDetector::new(THRESHOLD, 4);
-        detector.min_trigger_count = 3;
+        let mut detector = TriggerDetector::new(THRESHOLD, 3);
 
-        assert_eq!(detector.detect(&test_record(0, 0, 0)), false);
-        assert_eq!(detector.detect(&test_record(6, 0, 0)), false); // trigger_count == 1
-        assert_eq!(detector.detect(&test_record(6, 0, 0)), false); // trigger_count == 2
-        assert_eq!(detector.detect(&test_record(6, 0, 0)), true); // trigger_count == 3 -> active
+        assert!(!detector.detect(&test_record(0, 0, 0))); // [1, -, -]
+        assert!(!detector.detect(&test_record(0, 0, THRESHOLD + 1))); // [1, THRESHOLD, -]
+        assert!(detector.detect(&test_record(0, 0, THRESHOLD + 1))); // [1, THRESHOLD + 1, THRESHOLD + 1]
     }
 
-    #[test]
-    fn test_min_trigger_count_with_false_trigger() {
-        // A trigger should be detected when the window is not full yet.
-        const THRESHOLD: i32 = 5;
+    // #[test]
+    // fn test_detect_y_triggers() {
+    //     let mut detector = TriggerDetector::new(5, 3);
+    //     detector.min_trigger_count = 1;
 
-        let mut detector = TriggerDetector::new(THRESHOLD, 5);
-        detector.min_trigger_count = 3;
+    //     assert_eq!(detector.detect(&test_record(0, 1, 0)), false); // [1, -, -]
+    //     assert_eq!(detector.detect(&test_record(0, 3, 0)), false); // [1, 3, -]
+    //     assert_eq!(detector.detect(&test_record(0, -3, 0)), true); // [1, 3, -3]
 
-        assert_eq!(detector.detect(&test_record(0, 0, 0)), false);
-        assert_eq!(detector.detect(&test_record(0, THRESHOLD + 1, 0)), false); // trigger_count == 1
-        assert_eq!(detector.detect(&test_record(0, THRESHOLD + 1, 0)), false); // trigger_count == 2
-        assert_eq!(detector.detect(&test_record(0, THRESHOLD, 0)), false); // trigger_count == 2
-        assert_eq!(detector.detect(&test_record(0, THRESHOLD + 1, 0)), true); // trigger_count == 3 -> active
-    }
+    //     // The 3 is now the max value in the window, when it is replaced with 2 it should disable the trigger
+    //     assert_eq!(detector.detect(&test_record(0, 2, 0)), true); // [3, -3, 2]
+    //     assert_eq!(detector.detect(&test_record(0, 2, 0)), false); // [2, -3, 2]
+    // }
+
+    // #[test]
+    // fn test_detect_z_triggers() {
+    //     let mut detector = TriggerDetector::new(5, 3);
+    //     detector.min_trigger_count = 1;
+
+    //     assert_eq!(detector.detect(&test_record(0, 0, 1)), false); // [1, -, -]
+    //     assert_eq!(detector.detect(&test_record(0, 0, 3)), false); // [1, 3, -]
+    //     assert_eq!(detector.detect(&test_record(0, 0, -3)), true); // [1, 3, -3]
+
+    //     // The 3 is now the max value in the window, when it is replaced with 2 it should disable the trigger
+    //     assert_eq!(detector.detect(&test_record(0, 0, 2)), true); // [3, -3, 2]
+    //     assert_eq!(detector.detect(&test_record(0, 0, 2)), false); // [2, -3, 2]
+    // }
+
+    // #[test]
+    // fn test_trigger_when_window_is_not_full_yet() {
+    //     // A trigger should be detected when the window is not full yet.
+    //     let mut detector = TriggerDetector::new(5, 3);
+    //     detector.min_trigger_count = 1;
+
+    //     // Pick a high number to make sure we do not get a false trigger based on the window's init values
+    //     assert_eq!(detector.detect(&test_record(99, 0, 0)), false);
+    //     assert_eq!(detector.detect(&test_record(93, 0, 0)), true);
+    // }
+
+    // #[test]
+    // fn test_min_trigger_count() {
+    //     // A trigger should be detected when the window is not full yet.
+    //     const THRESHOLD: i32 = 5;
+
+    //     let mut detector = TriggerDetector::new(THRESHOLD, 4);
+    //     detector.min_trigger_count = 3;
+
+    //     assert_eq!(detector.detect(&test_record(0, 0, 0)), false);
+    //     assert_eq!(detector.detect(&test_record(6, 0, 0)), false); // trigger_count == 1
+    //     assert_eq!(detector.detect(&test_record(6, 0, 0)), false); // trigger_count == 2
+    //     assert_eq!(detector.detect(&test_record(6, 0, 0)), true); // trigger_count == 3 -> active
+    // }
+
+    // #[test]
+    // fn test_min_trigger_count_with_false_trigger() {
+    //     // A trigger should be detected when the window is not full yet.
+    //     const THRESHOLD: i32 = 5;
+
+    //     let mut detector = TriggerDetector::new(THRESHOLD, 5);
+    //     detector.min_trigger_count = 3;
+
+    //     assert_eq!(detector.detect(&test_record(0, 0, 0)), false);
+    //     assert_eq!(detector.detect(&test_record(0, THRESHOLD + 1, 0)), false); // trigger_count == 1
+    //     assert_eq!(detector.detect(&test_record(0, THRESHOLD + 1, 0)), false); // trigger_count == 2
+    //     assert_eq!(detector.detect(&test_record(0, THRESHOLD, 0)), false); // trigger_count == 2
+    //     assert_eq!(detector.detect(&test_record(0, THRESHOLD + 1, 0)), true); // trigger_count == 3 -> active
+    // }
 }
