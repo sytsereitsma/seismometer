@@ -137,6 +137,11 @@ void loop()
   RMSFilter rmsFilterY;
   RMSFilter rmsFilterZ;
 
+  int64_t sumX = 0;
+  int64_t sumY = 0;
+  int64_t sumZ = 0;
+  int sumCount = 0;
+
   while (1)
   {
     if (_adc.isDataReady())
@@ -148,25 +153,31 @@ void loop()
       res.ch1 -= ground;
       res.ch2 -= ground;
 
-      auto x = firX.filter(res.ch0);
-      auto y = firY.filter(res.ch1);
-      auto z = firZ.filter(res.ch2);
+      // auto x = firX.filter(res.ch0);
+      // auto y = firY.filter(res.ch1);
+      // auto z = firZ.filter(res.ch2);
+
+      sumX += res.ch0;
+      sumY += res.ch1;
+      sumZ += res.ch2;
+      sumCount++;
+
       
       auto now = millis();
       constexpr uint32_t kIntervalMs = 10;
 
       if (now - prevTime >= kIntervalMs)
       {
+
         prevTime = now;
-        status.value = res.status;
 
         Serial.print(micros());
         Serial.print(',');
-        Serial.print(static_cast <int32_t>(x));
+        Serial.print(static_cast <int32_t>(sumX / sumCount));
         Serial.print(',');
-        Serial.print(static_cast <int32_t>(y));
+        Serial.print(static_cast <int32_t>(sumY / sumCount));
         Serial.print(',');
-        Serial.print(static_cast <int32_t>(z));
+        Serial.print(static_cast <int32_t>(sumZ / sumCount));
         Serial.print(',');
         Serial.print(res.ch0);
         Serial.print(',');
@@ -174,6 +185,11 @@ void loop()
         Serial.print(',');
         Serial.print(res.ch2);
         Serial.println();
+
+        sumX = 0;
+        sumY = 0;
+        sumZ = 0;
+        sumCount = 0;
       }
     }
   }
