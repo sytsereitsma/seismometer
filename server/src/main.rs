@@ -1,103 +1,27 @@
 use serialport;
-use std::fs::OpenOptions;
-use std::io::Write;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use anyhow::Result;
 
+mod filerecordwriter;
 mod record;
 mod triggerdetector;
+
+use filerecordwriter::FileRecordWriter;
 use record::Record;
 
-struct DataRecorder {
-    count: usize,
-    window: Vec<Record>,
-    file: std::fs::File,
-    hold_counter: usize,
-}
-
-impl DataRecorder {
-    fn new(window_size: usize) -> Result<DataRecorder> {
-        let file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .append(true)
-            .open("seismodata.txt")?;
-    
-
-        Ok(DataRecorder {
-            count: 0,
-            window: vec![Record::default(); window_size],
-            file,
-            hold_counter: window_size,
-        })
-    }
-
-    fn record(&mut self, record: &Record, triggered: bool) {
-        if triggered {
-            self.hold_counter = 0;
-        }
-
-        if self.hold_counter < self.window.len() {
-            for i in 0..self.count {
-                self.write_record(&self.window[i].clone());
-            }
-
-            self.write_record(&record);
-            self.count = 0;
-            self.hold_counter += 1;
-        } else {
-            self.window[self.count] = record.clone();
-            self.count += 1;
-
-            if self.count == self.window.len() {
-                self.count = 0;
-
-                // Calculate average values
-                let mut avg = Record::default();
-                for r in &self.window {
-                    avg.timestamp += r.timestamp;
-                    avg.x += r.x;
-                    avg.y += r.y;
-                    avg.z += r.z;
-                    avg.x_filt += r.x_filt;
-                    avg.y_filt += r.y_filt;
-                    avg.z_filt += r.z_filt;
-                }
-
-                avg.timestamp /= self.window.len() as u64;
-                avg.x /= self.window.len() as i32;
-                avg.y /= self.window.len() as i32;
-                avg.z /= self.window.len() as i32;
-                avg.x_filt /= self.window.len() as i32;
-                avg.y_filt /= self.window.len() as i32;
-                avg.z_filt /= self.window.len() as i32; 
-
-                self.write_record(&avg);
-            }
-        }        
-    }
-
-    fn write_record(&mut self, record: &Record) {
-        self.file.write_all(format!("{},{},{},{},{},{},{}\n", record.timestamp, record.x, record.y, record.z, record.x_filt, record.y_filt, record.z_filt).as_bytes()).unwrap();
-    }
-}
-
 fn processing_thread(rx: mpsc::Receiver<Vec<u8>>, stop_thread: Arc<AtomicBool>) {
-    const TRIGGER_WINDOW : usize = 100;
-    const TRIGGER_LEVEL : i32 = 5000000;
+    const TRIGGER_WINDOW: usize = 100;
+    const AVERAGING_WINDOW: usize = 100;
+    const TRIGGER_LEVEL: i32 = 500000;
 
     let mut triggerdetector = triggerdetector::TriggerDetector::new(TRIGGER_LEVEL, TRIGGER_WINDOW);
-    let mut data_recorder = DataRecorder::new(TRIGGER_WINDOW).unwrap();
+    let mut data_writer = FileRecordWriter::new(AVERAGING_WINDOW).unwrap();
 
     let mut data: Vec<u8> = Vec::new();
-
-    let mut corrected_timestamp: u64 = 0;
-    let mut prev_timestamp: u64 = 0;
     let mut prev_triggered = false;
 
     loop {
@@ -118,18 +42,14 @@ fn processing_thread(rx: mpsc::Receiver<Vec<u8>>, stop_thread: Arc<AtomicBool>) 
         let newline = data.iter().position(|&x| x == b'\n');
 
         if let Some(pos) = newline {
-            if let Ok(mut rec) = Record::from(&data[..(pos - 1)]) {
-                // corrected_timestamp += rec.timestamp - prev_timestamp;
-                // prev_timestamp = rec.timestamp;
-                // rec.timestamp = corrected_timestamp;
-
+            if let Ok(rec) = Record::from(&data[..(pos - 1)]) {
                 let triggered = triggerdetector.detect(&rec);
                 if triggered != prev_triggered {
                     prev_triggered = triggered;
-                    println!("Trigger status changed: {} {}", triggered, rec.timestamp);
+                    println!("Trigger status changed: {} {}", triggered, rec.timestamp_us);
                 }
 
-                data_recorder.record(&rec, triggered);
+                data_writer.record(&rec, triggered);
             }
 
             data.drain(..pos + 1);

@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,7 +32,8 @@ impl fmt::Display for ParseError {
 
 #[derive(Clone)]
 pub struct Record {
-    pub timestamp: u64,
+    pub timestamp_us: u64,
+    pub timestamp_utc: DateTime<Utc>,
     pub x: i32,
     pub y: i32,
     pub z: i32,
@@ -43,7 +45,8 @@ pub struct Record {
 impl Record {
     pub fn default() -> Record {
         Record {
-            timestamp: 0,
+            timestamp_us: 0,
+            timestamp_utc: DateTime::from_timestamp(0, 0).unwrap(),
             x: 0,
             y: 0,
             z: 0,
@@ -57,13 +60,14 @@ impl Record {
         let mut parts = line.split(|&b| b == b',');
 
         let mut record = Record::default();
-        record.timestamp = Record::parse_next(&mut parts, 0)?;
-        record.x = Record::parse_next(&mut parts, 1)?;
-        record.y = Record::parse_next(&mut parts, 2)?;
-        record.z = Record::parse_next(&mut parts, 3)?;
-        record.x_filt = Record::parse_next(&mut parts, 4)?;
-        record.y_filt = Record::parse_next(&mut parts, 5)?;
-        record.z_filt = Record::parse_next(&mut parts, 6)?;
+        record.timestamp_utc = Utc::now();
+        record.timestamp_us = Record::parse_next(&mut parts, 0)?;
+        record.x_filt = Record::parse_next(&mut parts, 1)?;
+        record.y_filt = Record::parse_next(&mut parts, 2)?;
+        record.z_filt = Record::parse_next(&mut parts, 3)?;
+        record.x = Record::parse_next(&mut parts, 4)?;
+        record.y = Record::parse_next(&mut parts, 5)?;
+        record.z = Record::parse_next(&mut parts, 6)?;
 
         Ok(record)
     }
@@ -103,13 +107,13 @@ mod tests {
     fn test_from() {
         let line = b"123456789,1,-2,3,-4,5,-6";
         let record = Record::from(line).unwrap();
-        assert_eq!(record.timestamp, 123456789);
-        assert_eq!(record.x, 1);
-        assert_eq!(record.y, -2);
-        assert_eq!(record.z, 3);
-        assert_eq!(record.x_filt, -4);
-        assert_eq!(record.y_filt, 5);
-        assert_eq!(record.z_filt, -6);
+        assert_eq!(record.timestamp_us, 123456789);
+        assert_eq!(record.x_filt, 1);
+        assert_eq!(record.y_filt, -2);
+        assert_eq!(record.z_filt, 3);
+        assert_eq!(record.x, -4);
+        assert_eq!(record.y, 5);
+        assert_eq!(record.z, -6);
     }
 
     #[test]
