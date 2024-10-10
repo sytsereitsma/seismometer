@@ -1,0 +1,4 @@
+port="COM3"
+trigger_window=5
+trigger_level=200000
+averaging_window=10
