@@ -12,3 +12,8 @@ y_trigger_level = 25000
 z_trigger_level = 2000
 pre_trigger_time_ms = 10000
 post_trigger_time_ms = 10000
+filename="seismodata.txt"
+
+[raw_data_recorder]
+filename="raw_data.txt"
+enabled=false

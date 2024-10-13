@@ -58,15 +58,19 @@ fn main() {
         });
     }
 
-    let rmsreporter_thread =  {
-        let mut reporter = RMSRecorder::new(config.event_recorder.rms_window);
-        let stop = stop_thread.clone();
-        let rx = seismometer.subscribe();
+    if config.raw_data_recorder.enabled {
+        handler_threads.push({
+            let mut reporter =
+                filerecordwriter::FileRecordWriter::new(&config.raw_data_recorder.filename)
+                    .unwrap();
+            let stop = stop_thread.clone();
+            let rx = seismometer.subscribe();
 
-        thread::spawn(move || {
-            reporter.run(rx, stop);
-        })
-    };
+            thread::spawn(move || {
+                reporter.run(rx, stop);
+            })
+        });
+    }
 
     // The main thread is responsible for running the seismometer
     let data_acquisition_thread = {

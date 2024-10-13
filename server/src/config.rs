@@ -24,6 +24,7 @@ pub struct EventRecorderConfig {
     pub z_trigger_level: i32, // Trigger level for the Z channel
     pub pre_trigger_time_ms: u32, // Time window before the trigger event
     pub post_trigger_time_ms: u32, // Time window after the trigger event
+    pub filename: String,
 }
 
 impl Default for EventRecorderConfig {
@@ -36,6 +37,22 @@ impl Default for EventRecorderConfig {
             z_trigger_level: 4_000,
             pre_trigger_time_ms: 10_000,
             post_trigger_time_ms: 10_000,
+            filename: String::from("seismodata.txt"),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct RawDataRecorderConfig {
+    pub filename: String,
+    pub enabled: bool,
+}
+
+impl Default for RawDataRecorderConfig {
+    fn default() -> RawDataRecorderConfig {
+        Self {
+            filename: String::from("raw_data.txt"),
+            enabled: false,
         }
     }
 }
@@ -45,4 +62,5 @@ pub struct Config {
     pub port: String,
     pub statistics: StatisticsConfig,
     pub event_recorder: EventRecorderConfig,
+    pub raw_data_recorder: RawDataRecorderConfig,
 }
