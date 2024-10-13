@@ -5,8 +5,8 @@ report_interval_ms = 30000
 enabled = false
 
 [event_recorder]
-rms_window = 1000
-rms_delta_window = 10
+delta_window = 10
+filter_cutoff_frequency=2
 x_trigger_level = 25000
 y_trigger_level = 25000
 z_trigger_level = 2000

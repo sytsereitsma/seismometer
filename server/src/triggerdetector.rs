@@ -1,53 +1,59 @@
+use crate::emafilter::EMAFilter;
 use crate::record::Record;
-use crate::runningrms::RunningRMS;
+use std::fs::File;
+use std::io::Write;
 
 struct ChannelTriggerDetector {
-    running_rms: RunningRMS,
-    rms_delta_window: Vec<u32>,
-    rms_delta_index: usize,
-    rms_delta_buffer_full: bool,
-    threshold: u32,
+    filter: EMAFilter,
+    delta_window: Vec<i32>,
+    delta_index: usize,
+    delta_buffer_full: bool,
+    threshold: i32,
 }
 
 impl ChannelTriggerDetector {
-    fn new(threshold: u32, rms_window_size: usize, rms_delta_window: usize) -> ChannelTriggerDetector {
+    fn new(
+        threshold: u32,
+        cutoff_frequency: f64,
+        delta_window_size: usize,
+    ) -> ChannelTriggerDetector {
         ChannelTriggerDetector {
-            running_rms: RunningRMS::new(rms_window_size),
-            rms_delta_window: vec![0; rms_delta_window],
-            rms_delta_index: 0,
-            rms_delta_buffer_full: false,
-            threshold: threshold,
+            filter: EMAFilter::from(1000.0, cutoff_frequency),
+            delta_window: vec![0; delta_window_size],
+            delta_index: 0,
+            delta_buffer_full: false,
+            threshold: threshold as i32,
         }
     }
 
     fn add_sample(&mut self, value: i32) -> bool {
-        if let Some(rms) = self.running_rms.add_sample(value) {
-            self.rms_delta_window[self.rms_delta_index] = rms as u32;
-            self.rms_delta_index = (self.rms_delta_index + 1) % self.rms_delta_window.len();
-            self.rms_delta_buffer_full = self.rms_delta_buffer_full || (self.rms_delta_index == 0);
+        let filtered_value = self.filter.add_sample(value as f64).round() as i32;
 
-            if self.rms_delta_buffer_full {                                
-                // Determine min and max in the window
-                let mut min: u32 = u32::MAX;
-                let mut max: u32 = 0;
+        self.delta_window[self.delta_index] = filtered_value;
+        self.delta_index = (self.delta_index + 1) % self.delta_window.len();
+        self.delta_buffer_full = self.delta_buffer_full || (self.delta_index == 0);
 
-                for v in self.rms_delta_window.iter() {
-                    let value = *v;
+        if self.delta_buffer_full {
+            // Determine min and max in the window
+            let mut min: i32 = i32::MAX;
+            let mut max: i32 = i32::MIN;
 
-                    if value < min {
-                        min = value;
-                    }
-                    if value > max {
-                        max = value;
-                    }
+            for v in self.delta_window.iter() {
+                let value = *v;
 
-                    if (max - min) > self.threshold {
-                        return true;
-                   }
+                if value < min {
+                    min = value;
+                }
+                if value > max {
+                    max = value;
+                }
+
+                if (max - min) > self.threshold {
+                    return true;
                 }
             }
         }
-        
+
         false
     }
 }
@@ -56,6 +62,7 @@ pub struct TriggerDetector {
     x_detector: ChannelTriggerDetector,
     y_detector: ChannelTriggerDetector,
     z_detector: ChannelTriggerDetector,
+    file: std::fs::File,
 }
 
 impl TriggerDetector {
@@ -63,14 +70,26 @@ impl TriggerDetector {
         x_threshold: i32,
         y_threshold: i32,
         z_threshold: i32,
-        rms_window_size: usize,
-        rms_delta_window_size: usize,
+        cutoff_frequency: f64,
+        delta_window_size: usize,
     ) -> TriggerDetector {
         TriggerDetector {
-
-            x_detector: ChannelTriggerDetector::new(x_threshold as u32, rms_window_size, rms_delta_window_size),
-            y_detector: ChannelTriggerDetector::new(y_threshold as u32, rms_window_size, rms_delta_window_size),
-            z_detector: ChannelTriggerDetector::new(z_threshold as u32, rms_window_size, rms_delta_window_size),
+            x_detector: ChannelTriggerDetector::new(
+                x_threshold as u32,
+                cutoff_frequency,
+                delta_window_size,
+            ),
+            y_detector: ChannelTriggerDetector::new(
+                y_threshold as u32,
+                cutoff_frequency,
+                delta_window_size,
+            ),
+            z_detector: ChannelTriggerDetector::new(
+                z_threshold as u32,
+                cutoff_frequency,
+                delta_window_size,
+            ),
+            file: std::fs::File::create("debugtrigger.txt").unwrap(),
         }
     }
 
@@ -78,6 +97,18 @@ impl TriggerDetector {
         let x_triggered = self.x_detector.add_sample(record.x_filt);
         let y_triggered = self.y_detector.add_sample(record.y_filt);
         let z_triggered = self.z_detector.add_sample(record.z_filt);
+        self.file
+            .write_all(
+                format!(
+                    "{},{},{},{}\n",
+                    record.timestamp_us,
+                    self.x_detector.filter.value(),
+                    self.y_detector.filter.value(),
+                    self.z_detector.filter.value()
+                )
+                .as_bytes(),
+            )
+            .unwrap();
 
         x_triggered || y_triggered || z_triggered
     }
