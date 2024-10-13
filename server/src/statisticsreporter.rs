@@ -1,10 +1,7 @@
 use crate::config::StatisticsConfig;
 use crate::record::Record;
+use crate::recordhandler::RecordHandler;
 use crate::statistics::Statistics;
-use chrono::Utc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
-use std::time::Duration;
 
 pub struct StatisticsReporter {
     x_stats: Statistics,
@@ -25,15 +22,6 @@ impl StatisticsReporter {
         }
     }
 
-    pub fn run(&mut self, receiver: mpsc::Receiver<Record>, stop: Arc<AtomicBool>) {
-        while !stop.load(Ordering::Relaxed) {
-            match receiver.recv_timeout(Duration::from_millis(100)) {
-                Ok(record) => self.handle(&record),
-                Err(_) => (), // Ignore timeouts
-            }
-        }
-    }
-
     fn handle(&mut self, record: &Record) {
         self.x_stats.add(record.x_filt);
         self.y_stats.add(record.y_filt);
@@ -45,6 +33,12 @@ impl StatisticsReporter {
             self.y_stats.print_and_reset("Y:");
             self.z_stats.print_and_reset("Z:");
         }
+    }
+}
+
+impl RecordHandler for StatisticsReporter {
+    fn handle(&mut self, record: &Record) {
+        Self::handle(self, record);
     }
 }
 

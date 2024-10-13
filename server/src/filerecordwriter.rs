@@ -1,4 +1,5 @@
 use crate::record::Record;
+use crate::recordhandler::RecordHandler;
 use anyhow::Result;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -8,12 +9,12 @@ pub struct FileRecordWriter {
 }
 
 impl FileRecordWriter {
-    pub fn new() -> Result<Self> {
+    pub fn new(filename: &str) -> Result<Self> {
         let file = OpenOptions::new()
             .create(true)
             .write(true)
             .append(true)
-            .open("seismodata.txt")?;
+            .open(filename)?;
 
         Ok(Self { file })
     }
@@ -38,5 +39,11 @@ impl FileRecordWriter {
         if let Err(e) = res {
             eprintln!("Error writing record: {}", e);
         }
+    }
+}
+
+impl RecordHandler for FileRecordWriter {
+    fn handle(&mut self, record: &Record) {
+        Self::write_record(self, record, false);
     }
 }

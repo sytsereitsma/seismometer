@@ -1,11 +1,9 @@
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
-use std::time::Duration;
 
 use crate::config::EventRecorderConfig;
 use crate::filerecordwriter::FileRecordWriter;
 use crate::record::Record;
+use crate::recordhandler::RecordHandler;
 use crate::triggerdetector::TriggerDetector;
 
 pub trait Detector {
@@ -51,21 +49,12 @@ impl EventRecorder {
                 config.filter_cutoff_frequency,
                 config.delta_window,
             )),
-            data_writer: Box::new(FileRecordWriter::new().unwrap()),
+            data_writer: Box::new(FileRecordWriter::new(&config.filename).unwrap()),
             pre_trigger_time_us: config.pre_trigger_time_ms as u32 * 1000,
             post_trigger_time_us: config.post_trigger_time_ms as u32 * 1000,
             pre_trigger_buffer: VecDeque::with_capacity(128),
             last_trigger_time_us: 0,
             triggered: false,
-        }
-    }
-
-    pub fn run(&mut self, receiver: mpsc::Receiver<Record>, stop: Arc<AtomicBool>) {
-        while !stop.load(Ordering::Relaxed) {
-            match receiver.recv_timeout(Duration::from_millis(100)) {
-                Ok(record) => self.handle(&record),
-                Err(_) => (), // Ignore timeouts
-            }
         }
     }
 
@@ -117,6 +106,12 @@ impl EventRecorder {
         }
 
         self.pre_trigger_buffer.drain(0..end_index);
+    }
+}
+
+impl RecordHandler for EventRecorder {
+    fn handle(&mut self, record: &Record) {
+        Self::handle(self, record);
     }
 }
 
