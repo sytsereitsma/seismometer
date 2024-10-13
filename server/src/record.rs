@@ -32,7 +32,7 @@ impl fmt::Display for ParseError {
 
 #[derive(Clone)]
 pub struct Record {
-    pub timestamp_us: u64,
+    pub timestamp_us: u32,
     pub timestamp_utc: DateTime<Utc>,
     pub x: i32,
     pub y: i32,

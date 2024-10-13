@@ -1,4 +1,14 @@
 port="COM3"
-trigger_window=5
-trigger_level=200000
-averaging_window=10
+
+[statistics]
+report_interval_ms = 30000
+enabled = false
+
+[event_recorder]
+rms_window = 1000
+rms_delta_window = 10
+x_trigger_level = 25000
+y_trigger_level = 25000
+z_trigger_level = 2000
+pre_trigger_time_ms = 10000
+post_trigger_time_ms = 10000

@@ -67,7 +67,7 @@ impl Seismometer {
                         self.buffer.extend_from_slice(&data[..bytes_read]);
                         self.process_buffer();
                     }
-                },
+                }
                 Err(e) => {
                     eprintln!("Error reading from serial port: {}", e);
                 }

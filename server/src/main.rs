@@ -1,25 +1,26 @@
+use std::fs;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::thread;
-use std::fs;
 
 mod config;
 mod eventrecorder;
 mod filerecordwriter;
 mod pubsub;
 mod record;
+mod runningrms;
 mod seismometer;
 mod statistics;
-mod triggerdetector;
 mod statisticsreporter;
+mod triggerdetector;
+mod rmsrecorder;
 
-use clap;
 use config::Config;
 use eventrecorder::EventRecorder;
 use seismometer::Seismometer;
 use statisticsreporter::StatisticsReporter;
-
+use rmsrecorder::RMSRecorder;
 
 fn load_config() -> Config {
     let config_data = fs::read_to_string("config.toml").expect("Failed to read config file");
@@ -29,15 +30,11 @@ fn load_config() -> Config {
 fn main() {
     let config = load_config();
 
-    let matches = clap::command!()
-        .arg(clap::arg!(statistics: -s).action(clap::ArgAction::SetTrue))
-        .get_matches();
-
     let stop_thread = Arc::new(AtomicBool::new(false));
     let mut seismometer = Seismometer::new(&config.port).unwrap();
 
     let event_recorder_thread = {
-        let mut eventrecorder = EventRecorder::new(&config);
+        let mut eventrecorder = EventRecorder::new(&config.event_recorder);
         let stop = stop_thread.clone();
         let rx = seismometer.subscribe();
 
@@ -46,8 +43,20 @@ fn main() {
         })
     };
 
-    let statisticsreporter_thread = {
-        let mut reporter = StatisticsReporter::new();
+    let statisticsreporter_thread = if config.statistics.enabled {
+        let mut reporter = StatisticsReporter::new(&config.statistics);
+        let stop = stop_thread.clone();
+        let rx = seismometer.subscribe();
+
+        Some(thread::spawn(move || {
+            reporter.run(rx, stop);
+        }))
+    } else {
+        None
+    };
+
+    let rmsreporter_thread =  {
+        let mut reporter = RMSRecorder::new(config.event_recorder.rms_window);
         let stop = stop_thread.clone();
         let rx = seismometer.subscribe();
 
@@ -57,8 +66,8 @@ fn main() {
     };
 
     let data_acquisition_thread = {
-        let stop = stop_thread.clone();        
-        
+        let stop = stop_thread.clone();
+
         thread::spawn(move || {
             seismometer.run(stop);
         })
@@ -72,7 +81,10 @@ fn main() {
     });
 
     event_recorder_thread.join().unwrap();
-    statisticsreporter_thread.join().unwrap();
+    if let Some(stat_thread) = statisticsreporter_thread {
+        stat_thread.join().unwrap();
+    }
+    rmsreporter_thread.join().unwrap();
     data_acquisition_thread.join().unwrap();
     println!("Bye");
 }
