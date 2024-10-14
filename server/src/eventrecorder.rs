@@ -30,11 +30,11 @@ pub struct EventRecorder {
     triggerdetector: Box<dyn Detector + Send>,
     data_writer: Box<dyn Writer + Send>,
     /// Time window of data to log before the trigger event
-    pre_trigger_time_us: u32,
+    pre_trigger_time_us: u64,
     /// Time window of data to log after the trigger event
-    post_trigger_time_us: u32,
+    post_trigger_time_us: u64,
     /// Last trigger event time in microseconds
-    last_trigger_time_us: u32,
+    last_trigger_time_us: u64,
     pre_trigger_buffer: VecDeque<Record>,
     triggered: bool,
 }
@@ -42,16 +42,10 @@ pub struct EventRecorder {
 impl EventRecorder {
     pub fn new(config: &EventRecorderConfig) -> EventRecorder {
         EventRecorder {
-            triggerdetector: Box::new(TriggerDetector::new(
-                config.x_trigger_level,
-                config.y_trigger_level,
-                config.z_trigger_level,
-                config.filter_cutoff_frequency,
-                config.delta_window,
-            )),
+            triggerdetector: Box::new(TriggerDetector::new(&config.trigger_config)),
             data_writer: Box::new(FileRecordWriter::new(&config.filename).unwrap()),
-            pre_trigger_time_us: config.pre_trigger_time_ms as u32 * 1000,
-            post_trigger_time_us: config.post_trigger_time_ms as u32 * 1000,
+            pre_trigger_time_us: config.pre_trigger_time_ms as u64 * 1000,
+            post_trigger_time_us: config.post_trigger_time_ms as u64 * 1000,
             pre_trigger_buffer: VecDeque::with_capacity(128),
             last_trigger_time_us: 0,
             triggered: false,
@@ -95,7 +89,7 @@ impl EventRecorder {
         }
     }
 
-    fn clean_pre_trigger_buffer(&mut self, timestamp_us: u32) {
+    fn clean_pre_trigger_buffer(&mut self, timestamp_us: u64) {
         let mut end_index: usize = 0;
 
         while end_index < self.pre_trigger_buffer.len()
@@ -131,7 +125,7 @@ mod test {
         }
     }
     struct TestWriter {
-        timestamps: Arc<Mutex<Vec<u32>>>,
+        timestamps: Arc<Mutex<Vec<u64>>>,
     }
 
     impl Writer for TestWriter {
@@ -142,7 +136,7 @@ mod test {
 
     struct TestContext {
         triggered: Arc<AtomicBool>,
-        timestamps: Arc<Mutex<Vec<u32>>>,
+        timestamps: Arc<Mutex<Vec<u64>>>,
         recorder: EventRecorder,
         record: Record,
     }

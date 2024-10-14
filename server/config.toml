@@ -5,15 +5,18 @@ report_interval_ms = 30000
 enabled = false
 
 [event_recorder]
+pre_trigger_time_ms = 10000
+post_trigger_time_ms = 10000
+filename="seismodata.txt"
+
+[event_recorder.trigger_config]
 delta_window = 10
 filter_cutoff_frequency=2
 x_trigger_level = 25000
 y_trigger_level = 25000
 z_trigger_level = 2000
-pre_trigger_time_ms = 10000
-post_trigger_time_ms = 10000
-filename="seismodata.txt"
+debug_file="debugtrigger.txt"
 
 [raw_data_recorder]
 filename="raw_data.txt"
-enabled=false
+enabled=true

@@ -1,3 +1,4 @@
+use crate::config::TriggerDetectorConfig;
 use crate::emafilter::EMAFilter;
 use crate::record::Record;
 use std::fs::File;
@@ -13,7 +14,7 @@ struct ChannelTriggerDetector {
 
 impl ChannelTriggerDetector {
     fn new(
-        threshold: u32,
+        threshold: i32,
         cutoff_frequency: f64,
         delta_window_size: usize,
     ) -> ChannelTriggerDetector {
@@ -22,7 +23,7 @@ impl ChannelTriggerDetector {
             delta_window: vec![0; delta_window_size],
             delta_index: 0,
             delta_buffer_full: false,
-            threshold: threshold as i32,
+            threshold: threshold,
         }
     }
 
@@ -62,34 +63,33 @@ pub struct TriggerDetector {
     x_detector: ChannelTriggerDetector,
     y_detector: ChannelTriggerDetector,
     z_detector: ChannelTriggerDetector,
-    file: std::fs::File,
+    file: Option<std::fs::File>,
 }
 
 impl TriggerDetector {
-    pub fn new(
-        x_threshold: i32,
-        y_threshold: i32,
-        z_threshold: i32,
-        cutoff_frequency: f64,
-        delta_window_size: usize,
-    ) -> TriggerDetector {
+    pub fn new(config: &TriggerDetectorConfig) -> TriggerDetector {
+        let file = match &config.debug_filename {
+            Some(filename) => Some(File::create(filename).unwrap()),
+            None => None,
+        };
+
         TriggerDetector {
             x_detector: ChannelTriggerDetector::new(
-                x_threshold as u32,
-                cutoff_frequency,
-                delta_window_size,
+                config.x_trigger_level,
+                config.filter_cutoff_frequency,
+                config.delta_window,
             ),
             y_detector: ChannelTriggerDetector::new(
-                y_threshold as u32,
-                cutoff_frequency,
-                delta_window_size,
+                config.y_trigger_level,
+                config.filter_cutoff_frequency,
+                config.delta_window,
             ),
             z_detector: ChannelTriggerDetector::new(
-                z_threshold as u32,
-                cutoff_frequency,
-                delta_window_size,
+                config.z_trigger_level,
+                config.filter_cutoff_frequency,
+                config.delta_window,
             ),
-            file: std::fs::File::create("debugtrigger.txt").unwrap(),
+            file: file,
         }
     }
 
@@ -97,20 +97,29 @@ impl TriggerDetector {
         let x_triggered = self.x_detector.add_sample(record.x_filt);
         let y_triggered = self.y_detector.add_sample(record.y_filt);
         let z_triggered = self.z_detector.add_sample(record.z_filt);
-        self.file
-            .write_all(
+
+        self.write_debug_info(record, x_triggered, y_triggered, z_triggered);
+
+        x_triggered || y_triggered || z_triggered
+    }
+
+    fn write_debug_info(&mut self, record: &Record, x_triggered: bool, y_triggered: bool, z_triggered: bool) {
+        if let Some(file) = self.file.as_mut() {
+            file.write_all(
                 format!(
-                    "{},{},{},{}\n",
+                    "{},{},{},{},{},{},{}\n",
                     record.timestamp_us,
                     self.x_detector.filter.value(),
                     self.y_detector.filter.value(),
-                    self.z_detector.filter.value()
+                    self.z_detector.filter.value(),
+                    x_triggered,
+                    y_triggered,
+                    z_triggered,
                 )
                 .as_bytes(),
             )
             .unwrap();
-
-        x_triggered || y_triggered || z_triggered
+        }
     }
 }
 
@@ -118,111 +127,106 @@ impl TriggerDetector {
 mod tests {
     use super::*;
 
-    // fn test_record(x: i32, y: i32, z: i32) -> Record {
-    //     let mut record = Record::default();
+    #[test]
+    fn channel_trigger_detector(){
+        let mut detector = ChannelTriggerDetector {
+            filter: EMAFilter::new(1.0), // Disable the filter to ease testing
+            delta_window: vec![0; 3],
+            delta_index: 0,
+            delta_buffer_full: false,
+            threshold: 5,
+        };
 
-    //     record.x_filt = x;
-    //     record.y_filt = y;
-    //     record.z_filt = z;
-    //     record
-    // }
+        assert!(!detector.add_sample(0)); // [0, -, -]
+        assert!(!detector.add_sample(1)); // [0, 1, -]
+        assert!(!detector.add_sample(2)); // [0, 1, 2]
 
-    // #[test]
-    // fn test_detect_x_triggers() {
-    //     const X_THRESHOLD: i32 = 5;
-    //     const Y_THRESHOLD: i32 = 9999;
-    //     const Z_THRESHOLD: i32 = 9999;
-    //     const WINDOW_SIZE: usize = 3;
+        // 1 count short of > threshold
+        assert!(!detector.add_sample(1 + detector.threshold)); // [Thr + 1, 1, 2]
 
-    //     let mut detector = TriggerDetector::new(X_THRESHOLD, Y_THRESHOLD, Z_THRESHOLD, WINDOW_SIZE);
+        // Positive trigger
+        assert!(detector.add_sample(3 + detector.threshold)); // [Thr + 1, Thr + 3, 2] 
+        
+        // And the trigger condition is gone
+        assert!(!detector.add_sample(3 + detector.threshold)); // [Thr + 1, Thr + 3, Thr + 3] 
+        
+        // Negative trigger
+        assert!(detector.add_sample(-detector.threshold + 3)); // [Thr + 1, Thr + 3, Thr + 3] 
+    }
 
-    //     assert!(!detector.detect(&test_record(0, 0, 0))); // [0, -, -]
-    //     assert!(!detector.detect(&test_record(X_THRESHOLD + 1, 0, 0))); // [0, X_THRESHOLD, -]
-    //     assert!(detector.detect(&test_record(X_THRESHOLD + 1, 0, 0))); // [0, X_THRESHOLD + 1, X_THRESHOLD + 1]
-    // }
 
-    // #[test]
-    // fn test_detect_y_triggers() {
-    //     const X_THRESHOLD: i32 = 9999;
-    //     const Y_THRESHOLD: i32 = 5;
-    //     const Z_THRESHOLD: i32 = 9999;
-    //     const WINDOW_SIZE: usize = 3;
+    fn test_record(x: i32, y: i32, z: i32) -> Record {
+        let mut record = Record::default();
 
-    //     let mut detector = TriggerDetector::new(X_THRESHOLD, Y_THRESHOLD, Z_THRESHOLD, WINDOW_SIZE);
+        record.x_filt = x;
+        record.y_filt = y;
+        record.z_filt = z;
+        record
+    }
 
-    //     assert!(!detector.detect(&test_record(X_THRESHOLD + 1, 0, Z_THRESHOLD + 1))); // [0, -, -]
-    //     assert!(!detector.detect(&test_record(
-    //         X_THRESHOLD + 1,
-    //         Y_THRESHOLD + 1,
-    //         Z_THRESHOLD + 1
-    //     ))); // [0, Y_THRESHOLD, -]
-    //     assert!(detector.detect(&test_record(0, Y_THRESHOLD + 1, 0))); // [0, Y_THRESHOLD + 1, Y_THRESHOLD + 1]
-    // }
+    #[test]
+    fn test_detect_x_triggers() {
+        let config = TriggerDetectorConfig {
+            x_trigger_level: 5,
+            y_trigger_level: 9999,
+            z_trigger_level: 9999,
+            filter_cutoff_frequency: 1000.0,
+            delta_window: 2,
+            debug_filename: None,
+        };
 
-    // #[test]
-    // fn test_detect_z_triggers() {
-    //     const X_THRESHOLD: i32 = 9999;
-    //     const Y_THRESHOLD: i32 = 9999;
-    //     const Z_THRESHOLD: i32 = 5;
-    //     const WINDOW_SIZE: usize = 3;
+        let mut detector = TriggerDetector::new(&config);
 
-    //     let mut detector = TriggerDetector::new(X_THRESHOLD, Y_THRESHOLD, Z_THRESHOLD, WINDOW_SIZE);
+        assert!(!detector.detect(&test_record(0, 0, 0))); // [0, -]
 
-    //     assert!(!detector.detect(&test_record(X_THRESHOLD + 1, Y_THRESHOLD + 1, 0))); // [0, -, -]
-    //     assert!(!detector.detect(&test_record(
-    //         X_THRESHOLD + 1,
-    //         Y_THRESHOLD + 1,
-    //         Z_THRESHOLD + 1
-    //     ))); // [0, Z_THRESHOLD, -]
-    //     assert!(detector.detect(&test_record(0, 0, Z_THRESHOLD + 1))); // [0, Z_THRESHOLD + 1, Z_THRESHOLD + 1]
-    // }
+        // It should not trigger on y or z
+        assert!(!detector.detect(&test_record(0, config.x_trigger_level + 1, config.x_trigger_level + 1))); // [0, 0]
 
-    // #[test]
-    // fn test_detect_trigger_sign_is_handled() {
-    //     const THRESHOLD: i32 = 5;
+        // It should trigger on x
+        assert!(detector.detect(&test_record(config.x_trigger_level + 1, 0, 0))); // [level + 1, 0]
+    }
 
-    //     let mut detector = TriggerDetector::new(THRESHOLD, THRESHOLD, THRESHOLD, 3);
+    #[test]
+    fn test_detect_y_triggers() {
+        let config = TriggerDetectorConfig {
+            x_trigger_level: 9999,
+            y_trigger_level: 5,
+            z_trigger_level: 9999,
+            filter_cutoff_frequency: 1000.0,
+            delta_window: 2,
+            debug_filename: None,
+        };
 
-    //     assert!(!detector.detect(&test_record(0, 0, 0))); // [0, -, -]
-    //     assert!(!detector.detect(&test_record(THRESHOLD + 1, 0, 0))); // [0, THRESHOLD, -]
-    //                                                                   // All triggering values should be in the same direction
-    //     assert!(!detector.detect(&test_record(-(THRESHOLD + 10), 0, 0))); // [0, THRESHOLD + 1, -(THRESHOLD + 10)]
-    // }
+        let mut detector = TriggerDetector::new(&config);
 
-    // #[test]
-    // fn test_negative_trigger() {
-    //     const THRESHOLD: i32 = 5;
+        assert!(!detector.detect(&test_record(0, 0, 0))); // [0, -]
 
-    //     let mut detector = TriggerDetector::new(THRESHOLD, THRESHOLD, THRESHOLD, 3);
+        // It should not trigger on x or z
+        assert!(!detector.detect(&test_record(config.y_trigger_level + 1, 0, config.y_trigger_level + 1))); // [0, 0]
 
-    //     assert!(!detector.detect(&test_record(0, 0, 0))); // [0, -, -]
-    //     assert!(!detector.detect(&test_record(-THRESHOLD, 0, 0))); // [0, -THRESHOLD, -]
-    //     assert!(detector.detect(&test_record(-THRESHOLD, 0, 0))); // [0, -THRESHOLD, -THRESHOLD]
-    // }
+        // It should trigger on y
+        assert!(detector.detect(&test_record(0, config.y_trigger_level + 1, 0))); // [level + 1, 0]
+    }
 
-    // #[test]
-    // fn test_triggers_are_relative_to_first_value() {
-    //     const THRESHOLD: i32 = 5;
-    //     const FIRST_VALUE: i32 = 123;
+    #[test]
+    fn test_detect_z_triggers() {
+        let config = TriggerDetectorConfig {
+            x_trigger_level: 9999,
+            y_trigger_level: 9999,
+            z_trigger_level: 5,
+            filter_cutoff_frequency: 1000.0,
+            delta_window: 2,
+            debug_filename: None,
+        };
 
-    //     let mut detector = TriggerDetector::new(THRESHOLD, THRESHOLD, THRESHOLD, 3);
+        let mut detector = TriggerDetector::new(&config);
 
-    //     assert!(!detector.detect(&test_record(FIRST_VALUE, 0, 0))); // [FIRST_VALUE, -, -]
-    //     assert!(!detector.detect(&test_record(THRESHOLD + FIRST_VALUE + 1, 0, 0))); // [0, THRESHOLD + FIRST_VALUE + 1, -]
-    //     assert!(detector.detect(&test_record(THRESHOLD + FIRST_VALUE + 1, 0, 0)));
-    //     // [0, THRESHOLD + FIRST_VALUE + 1, THRESHOLD + FIRST_VALUE + 1]
-    // }
+        assert!(!detector.detect(&test_record(0, 0, 0))); // [0, -]
 
-    // #[test]
-    // fn test_window_rollover() {
-    //     const THRESHOLD: i32 = 5;
+        // It should not trigger on x or y
+        assert!(!detector.detect(&test_record(config.z_trigger_level + 1, config.z_trigger_level + 1, 0))); // [0, 0]
 
-    //     let mut detector = TriggerDetector::new(THRESHOLD, THRESHOLD, THRESHOLD, 3);
-
-    //     assert!(!detector.detect(&test_record(0, 0, 0))); // [0, -, -]
-    //     assert!(!detector.detect(&test_record(1, 0, 0))); // [0, 1, -]
-    //     assert!(!detector.detect(&test_record(2, 0, 0))); // [0, 1, 2]
-    //     assert!(!detector.detect(&test_record(2 + THRESHOLD + 1, 0, 0))); // [2 + THRESHOLD + 1, 1*, 2]
-    //     assert!(detector.detect(&test_record(2 + THRESHOLD + 1, 0, 0))); // [2 + THRESHOLD + 1, 2 + THRESHOLD + 1, 2*]
-    // }
+        // It should trigger on z
+        assert!(detector.detect(&test_record(0, 0, config.z_trigger_level + 1))); // [level + 1, 0]
+    }
 }

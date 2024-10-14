@@ -45,6 +45,7 @@ impl RecordHandler for StatisticsReporter {
 #[cfg(test)]
 mod test {
     use super::*;
+    use chrono::Utc;
 
     #[test]
     fn test_handle() {
