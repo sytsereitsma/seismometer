@@ -56,43 +56,40 @@ impl Record {
         }
     }
 
-    pub fn from<'a>(line: &[u8]) -> Result<Record, ParseError> {
+    pub fn from(line: &[u8]) -> Result<Record, ParseError> {
         let mut parts = line.split(|&b| b == b',');
 
         let mut record = Record::default();
         record.timestamp_utc = Utc::now();
-        record.timestamp_us = Record::parse_next(&mut parts, 0)?;
-        record.x_filt = Record::parse_next(&mut parts, 1)?;
-        record.y_filt = Record::parse_next(&mut parts, 2)?;
-        record.z_filt = Record::parse_next(&mut parts, 3)?;
-        record.x = Record::parse_next(&mut parts, 4)?;
-        record.y = Record::parse_next(&mut parts, 5)?;
-        record.z = Record::parse_next(&mut parts, 6)?;
+        record.timestamp_us = Record::parse_next(parts.next(), 0)?;
+        record.x_filt = Record::parse_next(parts.next(), 1)?;
+        record.y_filt = Record::parse_next(parts.next(), 2)?;
+        record.z_filt = Record::parse_next(parts.next(), 3)?;
+        record.x = Record::parse_next(parts.next(), 4)?;
+        record.y = Record::parse_next(parts.next(), 5)?;
+        record.z = Record::parse_next(parts.next(), 6)?;
 
         Ok(record)
     }
 
-    fn parse_next<'a, 'b, I, T>(parts: &'b mut I, column: usize) -> Result<T, ParseError>
+    fn parse_next<T>(field: Option<&[u8]>, column_number: usize) -> Result<T, ParseError>
     where
-        'a: 'b,
-        I: Iterator<Item = &'a [u8]>,
         T: std::str::FromStr,
     {
-        parts
-            .next()
+        field
             .ok_or(ParseError {
-                column: column,
+                column: column_number,
                 kind: ParseErrorKind::MissingField,
             })
-            .and_then(|field| {
-                std::str::from_utf8(field).map_err(|_| ParseError {
-                    column: column,
+            .and_then(|data| {
+                std::str::from_utf8(data).map_err(|_| ParseError {
+                    column: column_number,
                     kind: ParseErrorKind::InvalidUTF8,
                 })
             })
             .and_then(|s| {
                 s.parse::<T>().map_err(|_| ParseError {
-                    column: column,
+                    column: column_number,
                     kind: ParseErrorKind::InvalidNumber,
                 })
             })
@@ -129,7 +126,7 @@ mod tests {
             // Negative unsigned number
             let line = b"-123456789";
             let mut parts = line.split(|&b| b == b',');
-            let result: Result<u32, ParseError> = Record::parse_next(&mut parts, 3);
+            let result: Result<u32, ParseError> = Record::parse_next(parts.next(), 3);
             assert!(result.is_err());
 
             let err = result.unwrap_err();
@@ -141,7 +138,7 @@ mod tests {
             // Invalid char
             let line = b"1a2";
             let mut parts = line.split(|&b| b == b',');
-            let result: Result<i32, ParseError> = Record::parse_next(&mut parts, 4);
+            let result: Result<i32, ParseError> = Record::parse_next(parts.next(), 4);
             assert!(result.is_err());
 
             let err = result.unwrap_err();
@@ -154,7 +151,7 @@ mod tests {
             let line = b"";
             let mut parts = line.split(|&b| b == b',');
             let _ = parts.next().unwrap();
-            let result: Result<i32, ParseError> = Record::parse_next(&mut parts, 0);
+            let result: Result<i32, ParseError> = Record::parse_next(parts.next(), 0);
             assert!(result.is_err());
 
             let err = result.unwrap_err();
@@ -166,7 +163,7 @@ mod tests {
             // Invalid UTF8
             let line = b"\xFF";
             let mut parts = line.split(|&b| b == b',');
-            let result: Result<i32, ParseError> = Record::parse_next(&mut parts, 7);
+            let result: Result<i32, ParseError> = Record::parse_next(parts.next(), 7);
             assert!(result.is_err());
 
             let err = result.unwrap_err();
